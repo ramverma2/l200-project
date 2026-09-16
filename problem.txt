@@ -1,0 +1,8 @@
+The Blackjack Strategy Tutor (Casino Sector)
+The Concept: A text-based agent where the user plays Blackjack. If the user makes a mathematically poor decision (e.g., hitting on a hard 17), a "Tutor" agent intercepts to explain basic strategy.
+
+Tools & Interface (20 pts): Write simple local functions like deal_random_card or calculate_hand_total. Use strict JSON schemas for the inputs (e.g., {"action": "hit" | "stand"}) and write comprehensive docstrings for the tools.
+Orchestration (20 pts): Use a Multi-Agent Pattern. Have a "Dealer Agent" (using a fast model like Gemini Flash) manage the game flow, and a "Tutor Agent" (using Gemini Pro) analyze the player's moves.
+Context & Memory (20 pts): Use persistent session state to track the user's virtual "bankroll" across hands.
+Guardrails / Human-in-the-Loop (HITL): Code a hard stop that requires human confirmation via the terminal if the user attempts to bet more than 50% of their bankroll ("Are you sure you want to bet big? Y/N").
+Observability (20 pts): Log the Intent (User chooses to 'hit') and the Outcome (User draws a 10 and 'busts') in structured JSON format. 
