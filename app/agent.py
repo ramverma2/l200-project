@@ -58,7 +58,26 @@ def emit_observability_log(event_type: str, payload: dict[str, Any]) -> dict[str
     return record
 
 
-# ─── Pydantic Schemas ───────────────────────────────────────────
+# ─── Base Subscriptable Pydantic Model ──────────────────────────
+
+
+class SubscriptableBaseModel(BaseModel):
+    """Pydantic BaseModel with dictionary-like subscripting support for backwards compatibility."""
+
+    def __getitem__(self, item: str) -> Any:
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            raise KeyError(item) from None
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
+    def __contains__(self, item: str) -> bool:
+        return hasattr(self, item)
+
+
+# ─── Strict Pydantic Schemas for Tool Inputs & Outputs ──────────
 
 
 class PlayerAction(StrEnum):
@@ -67,7 +86,9 @@ class PlayerAction(StrEnum):
     DOUBLE = "double"
 
 
-class BetInput(BaseModel):
+class BetInput(SubscriptableBaseModel):
+    """Input parameters for placing a bet."""
+
     amount: float = Field(
         ...,
         description="The dollar amount to bet from the player's virtual bankroll.",
@@ -75,14 +96,55 @@ class BetInput(BaseModel):
     )
 
 
-class HandTotalInput(BaseModel):
+class BetOutput(SubscriptableBaseModel):
+    """Output schema for bet placement results."""
+
+    status: str = Field(
+        ...,
+        description="Status of the bet: 'success', 'confirmation_required', or 'error'.",
+    )
+    hitl_triggered: bool = Field(
+        default=False, description="Whether human-in-the-loop guardrail was triggered."
+    )
+    prompt: str | None = Field(
+        default=None, description="Confirmation prompt if HITL triggered."
+    )
+    bankroll: float = Field(..., description="Active bankroll amount.")
+    amount: float = Field(..., description="The wager amount requested.")
+    bet_amount: float | None = Field(
+        default=None, description="Alias for wager amount."
+    )
+    message: str = Field(
+        ..., description="Human-readable description of the bet status."
+    )
+    remaining_bankroll: float | None = Field(
+        default=None, description="Bankroll remaining after placing bet."
+    )
+
+
+class HandTotalInput(SubscriptableBaseModel):
+    """Input parameters for calculating hand total."""
+
     cards: list[str] = Field(
         ...,
         description="List of card representation strings (e.g. ['Ace of Spades', '7 of Diamonds'] or ['10', '7']).",
     )
 
 
-class StrategyCheckInput(BaseModel):
+class HandTotalOutput(SubscriptableBaseModel):
+    """Output schema for calculated hand totals."""
+
+    cards: list[str] = Field(..., description="Cards in the hand.")
+    total: int = Field(..., description="Optimal numerical hand total.")
+    is_soft: bool = Field(
+        ..., description="True if hand contains an Ace counted as 11 points."
+    )
+    is_bust: bool = Field(..., description="True if hand total exceeds 21.")
+
+
+class StrategyCheckInput(SubscriptableBaseModel):
+    """Input parameters for evaluating a proposed move against basic strategy."""
+
     player_cards: list[str] = Field(
         ...,
         description="The list of cards currently held by the player.",
@@ -97,10 +159,147 @@ class StrategyCheckInput(BaseModel):
     )
 
 
-class KnowledgeSearchInput(BaseModel):
+class StrategyCheckOutput(SubscriptableBaseModel):
+    """Output schema for basic strategy evaluation results."""
+
+    is_optimal: bool = Field(
+        ..., description="Whether the proposed move is mathematically optimal."
+    )
+    optimal_action: str = Field(
+        ..., description="The basic strategy prescribed action: 'hit' or 'stand'."
+    )
+    proposed_action: str = Field(..., description="The action evaluated.")
+    player_total: int = Field(..., description="Player's current point total.")
+    is_soft: bool = Field(..., description="Whether player's hand is soft.")
+    dealer_upcard: str = Field(..., description="The dealer's upcard.")
+    reason: str = Field(
+        ...,
+        description="Mathematical and probabilistic rationale for the optimal play.",
+    )
+
+
+class PlayerActionInput(SubscriptableBaseModel):
+    """Input parameters for executing a player move."""
+
+    action: str = Field(
+        ...,
+        description="The player's chosen action: 'hit' or 'stand'.",
+    )
+
+
+class PlayerActionOutput(SubscriptableBaseModel):
+    """Output schema for player action execution."""
+
+    action: str = Field(..., description="The action executed.")
+    card_drawn: str | None = Field(
+        default=None, description="The card drawn if action was 'hit'."
+    )
+    player_cards: list[str] = Field(..., description="Updated player cards.")
+    player_total: int = Field(..., description="Updated player total.")
+    is_bust: bool = Field(default=False, description="Whether the player busted.")
+    status: str = Field(
+        ...,
+        description="Execution status: 'safe', 'bust', 'stood', or 'invalid_action'.",
+    )
+    message: str = Field(..., description="Narrative summary of action outcome.")
+
+
+class DealCardOutput(SubscriptableBaseModel):
+    """Output schema for dealing a single card."""
+
+    card: str = Field(..., description="Display representation of the card.")
+    rank: str = Field(..., description="Rank of the card (e.g. '10', 'Ace').")
+    suit: str = Field(..., description="Suit of the card (e.g. 'Hearts', 'Spades').")
+    base_value: int = Field(..., description="Initial point value.")
+    is_ace: bool = Field(..., description="True if card is an Ace.")
+
+
+class StartNewHandOutput(SubscriptableBaseModel):
+    """Output schema for starting a new Blackjack hand."""
+
+    player_cards: list[str] = Field(
+        ..., description="Two initial cards dealt to player."
+    )
+    player_total: int = Field(..., description="Initial player total.")
+    is_soft: bool = Field(..., description="True if player hand is soft.")
+    dealer_upcard: str = Field(..., description="Dealer's face-up card.")
+    message: str = Field(..., description="Deal announcement message.")
+
+
+class PayoutOutput(SubscriptableBaseModel):
+    """Output schema for resolving dealer and payout."""
+
+    result: str = Field(
+        ..., description="Result of round: 'player_win', 'dealer_win', or 'push'."
+    )
+    dealer_cards: list[str] = Field(..., description="Dealer's completed hand.")
+    dealer_total: int = Field(..., description="Dealer's final total.")
+    payout: float = Field(..., description="Payout awarded to player.")
+    updated_bankroll: float = Field(..., description="Updated player bankroll.")
+    message: str = Field(..., description="Round outcome message.")
+
+
+class KnowledgeSearchInput(SubscriptableBaseModel):
+    """Input parameters for searching strategy knowledge base."""
+
     query: str = Field(
         ...,
         description="Natural language query to search the persistent vector store for strategy rules and player history.",
+    )
+
+
+class KnowledgeSearchOutput(SubscriptableBaseModel):
+    """Output schema for vector store search results."""
+
+    query: str = Field(..., description="The searched query.")
+    matches: list[dict[str, Any]] = Field(
+        ..., description="Top matching strategy documents and scores."
+    )
+    source: str = Field(
+        default="persistent_vector_store", description="Data source identifier."
+    )
+
+
+class CompactionInput(SubscriptableBaseModel):
+    """Input parameters for session history compaction."""
+
+    max_turns: int = Field(
+        default=6, description="Maximum number of historical turns before compaction."
+    )
+
+
+class CompactionOutput(SubscriptableBaseModel):
+    """Output schema for session history compaction."""
+
+    status: str = Field(
+        ..., description="Compaction status: 'compacted' or 'unchanged'."
+    )
+    summary: str = Field(..., description="Consolidated context summary.")
+    preserved_bankroll: float = Field(
+        ..., description="Preserved bankroll across compaction."
+    )
+
+
+class RecordHandInput(SubscriptableBaseModel):
+    """Input parameters for recording hand to persistent memory."""
+
+    result: str = Field(
+        ..., description="Outcome of round ('player_win', 'dealer_win', 'push')."
+    )
+    player_total: int = Field(..., description="Final player total.")
+    dealer_upcard: str = Field(..., description="Dealer's face-up card.")
+    action: str = Field(
+        ..., description="Key player action taken ('hit', 'stand', 'double')."
+    )
+
+
+class RecordHandOutput(SubscriptableBaseModel):
+    """Output schema for async memory recording."""
+
+    status: str = Field(..., description="Async persistence status.")
+    hands_played: int = Field(..., description="Total hands played in player history.")
+    player_stats: dict[str, Any] = Field(
+        ..., description="Updated cumulative player stats."
     )
 
 
@@ -131,42 +330,62 @@ def _parse_card(card_str: str) -> tuple[int, bool, str]:
     return val, is_ace, card_str
 
 
-# ─── ADK Tools with Strict JSON Schemas & Docstrings ─────────────
+# ─── ADK Tools with Strict Pydantic Signatures & Docstrings ───────
 
 
-def deal_random_card() -> dict[str, Any]:
+def deal_random_card() -> DealCardOutput:
     """Deals a single random card from a standard 52-card deck.
 
     Returns:
-        dict containing the card's rank, suit, display representation, and base point value.
+        DealCardOutput containing the card's rank, suit, display representation, and base point value.
     """
     with trace_span("blackjack.deal_random_card"):
         rank = random.choice(RANKS)
         suit = random.choice(SUITS)
         card_name = f"{rank} of {suit}"
         val, is_ace = _card_value(rank)
-        return {
-            "card": card_name,
-            "rank": rank,
-            "suit": suit,
-            "base_value": 11 if is_ace else val,
-            "is_ace": is_ace,
-        }
+        return DealCardOutput(
+            card=card_name,
+            rank=rank,
+            suit=suit,
+            base_value=11 if is_ace else val,
+            is_ace=is_ace,
+        )
 
 
-def calculate_hand_total(cards: list[str]) -> dict[str, Any]:
+def calculate_hand_total(
+    params: HandTotalInput | None = None,
+    *,
+    cards: list[str] | None = None,
+) -> HandTotalOutput:
     """Calculates the optimal Blackjack total for a given list of cards, correctly adjusting Aces.
 
     Args:
-        cards: List of card strings in the hand (e.g. ['Ace of Spades', '7 of Hearts']).
+        params: Strict HandTotalInput containing cards list.
+        cards: Direct list of card strings in the hand (e.g. ['Ace of Spades', '7 of Hearts']).
 
     Returns:
-        dict containing total (int), is_soft (bool indicating an Ace counted as 11), and is_bust (bool).
+        HandTotalOutput containing total (int), is_soft (bool indicating an Ace counted as 11), and is_bust (bool).
     """
-    with trace_span("blackjack.calculate_hand_total", {"cards": cards}) as span:
+    if isinstance(params, list):
+        cards = params
+        params = None
+
+    if params is not None:
+        input_data = params
+    elif cards is not None:
+        input_data = HandTotalInput(cards=cards)
+    else:
+        input_data = HandTotalInput(cards=[])
+
+    resolved_cards = input_data.cards
+
+    with trace_span(
+        "blackjack.calculate_hand_total", {"cards": resolved_cards}
+    ) as span:
         total = 0
         ace_count = 0
-        for c in cards:
+        for c in resolved_cards:
             val, is_ace, _ = _parse_card(c)
             if is_ace:
                 ace_count += 1
@@ -182,48 +401,73 @@ def calculate_hand_total(cards: list[str]) -> dict[str, Any]:
         if ace_count > 0 and total <= 21:
             is_soft = True
 
-        result = {
-            "cards": cards,
-            "total": total,
-            "is_soft": is_soft,
-            "is_bust": total > 21,
-        }
+        result = HandTotalOutput(
+            cards=resolved_cards,
+            total=total,
+            is_soft=is_soft,
+            is_bust=total > 21,
+        )
         span.set_attribute("calculated_total", total)
         span.set_attribute("is_soft", is_soft)
         return result
 
 
 def check_basic_strategy(
-    player_cards: list[str],
-    dealer_upcard: str,
-    proposed_action: str,
-) -> dict[str, Any]:
+    params: StrategyCheckInput | None = None,
+    *,
+    player_cards: list[str] | None = None,
+    dealer_upcard: str | None = None,
+    proposed_action: str | None = None,
+) -> StrategyCheckOutput:
     """Evaluates the player's proposed move against standard Blackjack basic strategy.
 
     Emits OpenTelemetry distributed tracing spans with strategy evaluation metadata.
 
     Args:
+        params: Strict StrategyCheckInput Pydantic model with player cards, dealer upcard, and proposed action.
         player_cards: List of cards in the player's hand (e.g. ['10 of Clubs', '7 of Hearts']).
         dealer_upcard: The single upcard visible from the dealer (e.g. '10 of Spades' or 'Ace').
         proposed_action: The action proposed by player: 'hit' or 'stand'.
 
     Returns:
-        dict indicating whether the proposed move is optimal, what the mathematically optimal
+        StrategyCheckOutput indicating whether the proposed move is optimal, what the mathematically optimal
         move is, and the strategic explanation for why it is optimal.
     """
+    if isinstance(params, list):
+        player_cards = params
+        params = None
+
+    if params is not None:
+        input_data = params
+    elif (
+        player_cards is not None
+        and dealer_upcard is not None
+        and proposed_action is not None
+    ):
+        input_data = StrategyCheckInput(
+            player_cards=player_cards,
+            dealer_upcard=dealer_upcard,
+            proposed_action=proposed_action,
+        )
+    else:
+        raise ValueError("Missing required arguments for check_basic_strategy.")
+
+    p_cards = input_data.player_cards
+    d_upcard = input_data.dealer_upcard
+    action = input_data.proposed_action.strip().lower()
+
     with trace_span(
         "blackjack.check_basic_strategy",
         {
-            "player_cards": player_cards,
-            "dealer_upcard": dealer_upcard,
-            "proposed_action": proposed_action,
+            "player_cards": p_cards,
+            "dealer_upcard": d_upcard,
+            "proposed_action": action,
         },
     ) as span:
-        hand_calc = calculate_hand_total(player_cards)
-        total = hand_calc["total"]
-        is_soft = hand_calc["is_soft"]
-        dealer_val, is_dealer_ace, _ = _parse_card(dealer_upcard)
-        action = proposed_action.strip().lower()
+        hand_calc = calculate_hand_total(cards=p_cards)
+        total = hand_calc.total
+        is_soft = hand_calc.is_soft
+        dealer_val, is_dealer_ace, _ = _parse_card(d_upcard)
 
         is_optimal = True
         optimal_action = action
@@ -236,7 +480,7 @@ def check_basic_strategy(
                 if action == "hit":
                     is_optimal = False
                     reason = (
-                        f"Player has Hard {total} against dealer {dealer_upcard}. "
+                        f"Player has Hard {total} against dealer {d_upcard}. "
                         f"Hitting on hard 17+ has a high bust rate (>69%). Basic strategy requires standing."
                     )
             elif 12 <= total <= 16:
@@ -246,7 +490,7 @@ def check_basic_strategy(
                     if action == "hit":
                         is_optimal = False
                         reason = (
-                            f"Player has Hard {total} against dealer bust-card {dealer_upcard} (value {dealer_val}). "
+                            f"Player has Hard {total} against dealer bust-card {d_upcard} (value {dealer_val}). "
                             f"Basic strategy dictates standing and letting the dealer bust."
                         )
                 else:
@@ -254,7 +498,7 @@ def check_basic_strategy(
                     if action == "stand":
                         is_optimal = False
                         reason = (
-                            f"Player has Hard {total} against strong dealer upcard {dealer_upcard}. "
+                            f"Player has Hard {total} against strong dealer upcard {d_upcard}. "
                             f"Basic strategy dictates hitting because the dealer is likely to make 17-21."
                         )
             elif total <= 11:
@@ -274,7 +518,7 @@ def check_basic_strategy(
                     if action == "stand":
                         is_optimal = False
                         reason = (
-                            f"Player has Soft 18 against strong dealer upcard {dealer_upcard}. "
+                            f"Player has Soft 18 against strong dealer upcard {d_upcard}. "
                             f"Against a 9, 10, or Ace, 18 is an underdog hand. Hitting is mathematically optimal "
                             f"because you cannot bust and drawing 2, 3, or Ace improves your position."
                         )
@@ -283,7 +527,7 @@ def check_basic_strategy(
                     if action == "hit":
                         is_optimal = False
                         reason = (
-                            f"Player has Soft 18 against dealer {dealer_upcard}. "
+                            f"Player has Soft 18 against dealer {d_upcard}. "
                             f"Basic strategy dictates standing against 2, 7, or 8 (or doubling against 3-6)."
                         )
             elif total >= 19:
@@ -303,124 +547,157 @@ def check_basic_strategy(
         span.set_attribute("is_optimal", is_optimal)
         span.set_attribute("optimal_action", optimal_action)
 
-        return {
-            "is_optimal": is_optimal,
-            "optimal_action": optimal_action,
-            "proposed_action": action,
-            "player_total": total,
-            "is_soft": is_soft,
-            "dealer_upcard": dealer_upcard,
-            "reason": reason,
-        }
+        return StrategyCheckOutput(
+            is_optimal=is_optimal,
+            optimal_action=optimal_action,
+            proposed_action=action,
+            player_total=total,
+            is_soft=is_soft,
+            dealer_upcard=d_upcard,
+            reason=reason,
+        )
 
 
-def place_bet(amount: float, tool_context: ToolContext) -> dict[str, Any]:
+def place_bet(
+    params: BetInput | None = None,
+    *,
+    amount: float | None = None,
+    tool_context: ToolContext | None = None,
+) -> BetOutput:
     """Places a bet for the round from the user's persistent bankroll.
 
     Enforces the HITL guardrail: If the proposed bet exceeds 50% of the active
     bankroll, a hard stop is triggered requiring terminal confirmation.
 
     Args:
-        amount: The dollar amount the player wishes to wager.
+        params: Strict BetInput Pydantic model.
+        amount: Direct dollar amount the player wishes to wager.
+        tool_context: ADK ToolContext injected by runtime for state and confirmation management.
 
     Returns:
-        dict with bet confirmation details or HITL confirmation prompt status.
+        BetOutput with bet confirmation details or HITL confirmation prompt status.
     """
-    bankroll = float(tool_context.state.get("bankroll", 1000.0))
+    if isinstance(params, (float, int)):
+        amount = float(params)
+        params = None
+
+    if params is not None:
+        input_data = params
+    elif amount is not None:
+        input_data = BetInput(amount=amount)
+    else:
+        raise ValueError("Missing amount for place_bet.")
+
+    wager = input_data.amount
+    bankroll = (
+        float(tool_context.state.get("bankroll", 1000.0)) if tool_context else 1000.0
+    )
 
     with trace_span(
         "blackjack.place_bet",
-        {"proposed_bet": amount, "bankroll": bankroll},
+        {"proposed_bet": wager, "bankroll": bankroll},
     ) as span:
         # Guardrail / Human-in-the-Loop check: Bet > 50% of bankroll
-        if amount > 0.5 * bankroll:
+        if wager > 0.5 * bankroll:
             span.set_attribute("hitl_triggered", True)
             # Check if already confirmed via ADK tool_confirmation
-            has_adk_confirm = tool_context.tool_confirmation and getattr(
-                tool_context.tool_confirmation, "confirmed", False
+            has_adk_confirm = (
+                tool_context
+                and tool_context.tool_confirmation
+                and getattr(tool_context.tool_confirmation, "confirmed", False)
             )
             if not has_adk_confirm:
                 # Trigger ADK confirmation request
-                try:
-                    tool_context.request_confirmation(
-                        hint="Are you sure you want to bet big? Y/N"
-                    )
-                except Exception:
-                    pass
+                if tool_context:
+                    try:
+                        tool_context.request_confirmation(
+                            hint="Are you sure you want to bet big? Y/N"
+                        )
+                    except Exception:
+                        pass
 
                 emit_observability_log(
                     "hitl_guardrail_triggered",
                     {
                         "guardrail": "large_bet_protection",
-                        "bet_amount": amount,
+                        "bet_amount": wager,
                         "bankroll": bankroll,
                         "threshold_percent": 50.0,
                         "prompt": "Are you sure you want to bet big? Y/N",
                     },
                 )
 
-                return {
-                    "status": "confirmation_required",
-                    "hitl_triggered": True,
-                    "prompt": "Are you sure you want to bet big? Y/N",
-                    "bankroll": bankroll,
-                    "amount": amount,
-                    "message": (
-                        f"HITL Guardrail Triggered: You are betting ${amount:.2f}, which is "
-                        f"{(amount / bankroll) * 100:.1f}% of your ${bankroll:.2f} bankroll. "
+                return BetOutput(
+                    status="confirmation_required",
+                    hitl_triggered=True,
+                    prompt="Are you sure you want to bet big? Y/N",
+                    bankroll=bankroll,
+                    amount=wager,
+                    message=(
+                        f"HITL Guardrail Triggered: You are betting ${wager:.2f}, which is "
+                        f"{(wager / bankroll) * 100:.1f}% of your ${bankroll:.2f} bankroll. "
                         "Are you sure you want to bet big? Y/N"
                     ),
-                }
+                )
 
-        if amount > bankroll:
+        if wager > bankroll:
             span.set_attribute("error", "insufficient_bankroll")
-            return {
-                "status": "error",
-                "message": f"Insufficient bankroll. Current bankroll is ${bankroll:.2f}.",
-            }
+            return BetOutput(
+                status="error",
+                bankroll=bankroll,
+                amount=wager,
+                message=f"Insufficient bankroll. Current bankroll is ${bankroll:.2f}.",
+            )
 
-        tool_context.state["bankroll"] = bankroll - amount
-        tool_context.state["current_bet"] = amount
-        tool_context.state["game_status"] = "bet_placed"
+        if tool_context:
+            tool_context.state["bankroll"] = bankroll - wager
+            tool_context.state["current_bet"] = wager
+            tool_context.state["game_status"] = "bet_placed"
+            remaining = tool_context.state["bankroll"]
+        else:
+            remaining = bankroll - wager
 
         emit_observability_log(
             "bet_placed",
             {
-                "amount": amount,
-                "remaining_bankroll": tool_context.state["bankroll"],
+                "amount": wager,
+                "remaining_bankroll": remaining,
             },
         )
 
-        span.set_attribute("remaining_bankroll", tool_context.state["bankroll"])
-        return {
-            "status": "success",
-            "bet_amount": amount,
-            "remaining_bankroll": tool_context.state["bankroll"],
-            "message": f"Bet of ${amount:.2f} accepted. Ready to deal cards.",
-        }
+        span.set_attribute("remaining_bankroll", remaining)
+        return BetOutput(
+            status="success",
+            bankroll=bankroll,
+            amount=wager,
+            bet_amount=wager,
+            remaining_bankroll=remaining,
+            message=f"Bet of ${wager:.2f} accepted. Ready to deal cards.",
+        )
 
 
-def start_new_hand(tool_context: ToolContext) -> dict[str, Any]:
+def start_new_hand(tool_context: ToolContext) -> StartNewHandOutput:
     """Deals the initial 2 cards to player and 2 cards to dealer.
 
     Returns:
-        dict containing the player's initial cards, total, and dealer's visible upcard.
+        StartNewHandOutput containing the player's initial cards, total, and dealer's visible upcard.
     """
     with trace_span("blackjack.start_new_hand") as span:
-        card1 = deal_random_card()["card"]
-        card2 = deal_random_card()["card"]
+        card1 = deal_random_card().card
+        card2 = deal_random_card().card
         player_cards = [card1, card2]
 
-        d_card1 = deal_random_card()["card"]
-        d_card2 = deal_random_card()["card"]
+        d_card1 = deal_random_card().card
+        d_card2 = deal_random_card().card
         dealer_cards = [d_card1, d_card2]
 
-        tool_context.state["player_cards"] = player_cards
-        tool_context.state["dealer_cards"] = dealer_cards
-        tool_context.state["dealer_upcard"] = d_card1
-        tool_context.state["game_status"] = "player_turn"
+        if tool_context:
+            tool_context.state["player_cards"] = player_cards
+            tool_context.state["dealer_cards"] = dealer_cards
+            tool_context.state["dealer_upcard"] = d_card1
+            tool_context.state["game_status"] = "player_turn"
 
-        p_calc = calculate_hand_total(player_cards)
+        p_calc = calculate_hand_total(cards=player_cards)
 
         span.set_attribute("player_cards", str(player_cards))
         span.set_attribute("dealer_upcard", d_card1)
@@ -429,66 +706,89 @@ def start_new_hand(tool_context: ToolContext) -> dict[str, Any]:
             "hand_started",
             {
                 "player_cards": player_cards,
-                "player_total": p_calc["total"],
-                "is_soft": p_calc["is_soft"],
+                "player_total": p_calc.total,
+                "is_soft": p_calc.is_soft,
                 "dealer_upcard": d_card1,
             },
         )
 
-        return {
-            "player_cards": player_cards,
-            "player_total": p_calc["total"],
-            "is_soft": p_calc["is_soft"],
-            "dealer_upcard": d_card1,
-            "message": (
-                f"Cards dealt! Player hand: {player_cards} (Total: {p_calc['total']}). "
+        return StartNewHandOutput(
+            player_cards=player_cards,
+            player_total=p_calc.total,
+            is_soft=p_calc.is_soft,
+            dealer_upcard=d_card1,
+            message=(
+                f"Cards dealt! Player hand: {player_cards} (Total: {p_calc.total}). "
                 f"Dealer upcard: {d_card1}."
             ),
-        }
+        )
 
 
-def execute_player_action(action: str, tool_context: ToolContext) -> dict[str, Any]:
+def execute_player_action(
+    params: PlayerActionInput | None = None,
+    *,
+    action: str | None = None,
+    tool_context: ToolContext | None = None,
+) -> PlayerActionOutput:
     """Executes the player's chosen action ('hit' or 'stand'), logging Intent and Outcome.
 
     Emits OpenTelemetry spans capturing intent and outcome with zero PII leakage.
 
     Args:
-        action: The player's confirmed action: 'hit' or 'stand'.
+        params: Strict PlayerActionInput Pydantic model with action.
+        action: Direct action string: 'hit' or 'stand'.
+        tool_context: ADK ToolContext injected by runtime.
 
     Returns:
-        dict with the outcome of the action, updated hand, and whether the player busted.
+        PlayerActionOutput with the outcome of the action, updated hand, and whether the player busted.
     """
-    with trace_span("blackjack.execute_player_action", {"action": action}) as span:
-        player_cards = list(tool_context.state.get("player_cards", []))
-        dealer_upcard = tool_context.state.get("dealer_upcard", "Unknown")
-        pre_calc = calculate_hand_total(player_cards)
+    if params is not None:
+        input_data = params
+    elif action is not None:
+        input_data = PlayerActionInput(action=action)
+    else:
+        raise ValueError("Missing action for execute_player_action.")
 
-        span.set_attribute("intent", action.lower())
-        span.set_attribute("pre_total", pre_calc["total"])
+    act = input_data.action.lower()
+
+    with trace_span("blackjack.execute_player_action", {"action": act}) as span:
+        player_cards = (
+            list(tool_context.state.get("player_cards", [])) if tool_context else []
+        )
+        dealer_upcard = (
+            tool_context.state.get("dealer_upcard", "Unknown")
+            if tool_context
+            else "Unknown"
+        )
+        pre_calc = calculate_hand_total(cards=player_cards)
+
+        span.set_attribute("intent", act)
+        span.set_attribute("pre_total", pre_calc.total)
 
         # Log the Intent in structured JSON format with PII redaction
         emit_observability_log(
             "player_intent",
             {
-                "intent": action.lower(),
+                "intent": act,
                 "player_cards": player_cards,
-                "player_total_before": pre_calc["total"],
+                "player_total_before": pre_calc.total,
                 "dealer_upcard": dealer_upcard,
             },
         )
 
-        if action.lower() == "hit":
-            new_card = deal_random_card()["card"]
+        if act == "hit":
+            new_card = deal_random_card().card
             player_cards.append(new_card)
-            tool_context.state["player_cards"] = player_cards
-            post_calc = calculate_hand_total(player_cards)
+            if tool_context:
+                tool_context.state["player_cards"] = player_cards
+            post_calc = calculate_hand_total(cards=player_cards)
 
-            outcome_status = "bust" if post_calc["is_bust"] else "safe"
-            if post_calc["is_bust"]:
+            outcome_status = "bust" if post_calc.is_bust else "safe"
+            if post_calc.is_bust and tool_context:
                 tool_context.state["game_status"] = "round_over"
 
             span.set_attribute("outcome", outcome_status)
-            span.set_attribute("post_total", post_calc["total"])
+            span.set_attribute("post_total", post_calc.total)
 
             # Log the Outcome in structured JSON format with PII redaction
             emit_observability_log(
@@ -496,26 +796,27 @@ def execute_player_action(action: str, tool_context: ToolContext) -> dict[str, A
                 {
                     "action": "hit",
                     "card_drawn": new_card,
-                    "new_player_total": post_calc["total"],
+                    "new_player_total": post_calc.total,
                     "outcome": outcome_status,
                 },
             )
 
-            return {
-                "action": "hit",
-                "card_drawn": new_card,
-                "player_cards": player_cards,
-                "player_total": post_calc["total"],
-                "is_bust": post_calc["is_bust"],
-                "status": outcome_status,
-                "message": (
-                    f"Drew {new_card}. New total: {post_calc['total']}."
-                    + (" BUST! You lose." if post_calc["is_bust"] else "")
+            return PlayerActionOutput(
+                action="hit",
+                card_drawn=new_card,
+                player_cards=player_cards,
+                player_total=post_calc.total,
+                is_bust=post_calc.is_bust,
+                status=outcome_status,
+                message=(
+                    f"Drew {new_card}. New total: {post_calc.total}."
+                    + (" BUST! You lose." if post_calc.is_bust else "")
                 ),
-            }
+            )
 
-        elif action.lower() == "stand":
-            tool_context.state["game_status"] = "dealer_turn"
+        elif act == "stand":
+            if tool_context:
+                tool_context.state["game_status"] = "dealer_turn"
             span.set_attribute("outcome", "stood_pat")
 
             # Log the Stand Outcome
@@ -523,49 +824,63 @@ def execute_player_action(action: str, tool_context: ToolContext) -> dict[str, A
                 "player_outcome",
                 {
                     "action": "stand",
-                    "player_total": pre_calc["total"],
+                    "player_total": pre_calc.total,
                     "outcome": "stood_pat",
                 },
             )
-            return {
-                "action": "stand",
-                "player_cards": player_cards,
-                "player_total": pre_calc["total"],
-                "status": "stood",
-                "message": f"Player stands on {pre_calc['total']}. Dealer's turn.",
-            }
+            return PlayerActionOutput(
+                action="stand",
+                player_cards=player_cards,
+                player_total=pre_calc.total,
+                status="stood",
+                message=f"Player stands on {pre_calc.total}. Dealer's turn.",
+            )
 
-        return {"status": "invalid_action", "message": f"Unknown action: {action}"}
+        return PlayerActionOutput(
+            action=act,
+            player_cards=player_cards,
+            player_total=pre_calc.total,
+            status="invalid_action",
+            message=f"Unknown action: {act}",
+        )
 
 
-def resolve_dealer_and_payout(tool_context: ToolContext) -> dict[str, Any]:
+def resolve_dealer_and_payout(tool_context: ToolContext) -> PayoutOutput:
     """Plays out the dealer hand according to casino rules (dealer hits until 17+) and resolves bets.
 
     Returns:
-        dict containing dealer final hand, total, winner determination, and updated bankroll.
+        PayoutOutput containing dealer final hand, total, winner determination, and updated bankroll.
     """
     with trace_span("blackjack.resolve_dealer_and_payout") as span:
-        player_cards = list(tool_context.state.get("player_cards", []))
-        dealer_cards = list(tool_context.state.get("dealer_cards", []))
-        bet = float(tool_context.state.get("current_bet", 0.0))
-        bankroll = float(tool_context.state.get("bankroll", 1000.0))
+        player_cards = (
+            list(tool_context.state.get("player_cards", [])) if tool_context else []
+        )
+        dealer_cards = (
+            list(tool_context.state.get("dealer_cards", [])) if tool_context else []
+        )
+        bet = float(tool_context.state.get("current_bet", 0.0)) if tool_context else 0.0
+        bankroll = (
+            float(tool_context.state.get("bankroll", 1000.0))
+            if tool_context
+            else 1000.0
+        )
 
-        p_calc = calculate_hand_total(player_cards)
-        if p_calc["is_bust"]:
+        p_calc = calculate_hand_total(cards=player_cards)
+        if p_calc.is_bust:
             result = "dealer_win"
             payout = 0.0
         else:
             # Dealer draws to 17
-            d_calc = calculate_hand_total(dealer_cards)
-            while d_calc["total"] < 17:
-                c = deal_random_card()["card"]
+            d_calc = calculate_hand_total(cards=dealer_cards)
+            while d_calc.total < 17:
+                c = deal_random_card().card
                 dealer_cards.append(c)
-                d_calc = calculate_hand_total(dealer_cards)
+                d_calc = calculate_hand_total(cards=dealer_cards)
 
-            d_total = d_calc["total"]
-            p_total = p_calc["total"]
+            d_total = d_calc.total
+            p_total = p_calc.total
 
-            if d_calc["is_bust"]:
+            if d_calc.is_bust:
                 result = "player_win"
                 payout = bet * 2.0
             elif p_total > d_total:
@@ -579,69 +894,104 @@ def resolve_dealer_and_payout(tool_context: ToolContext) -> dict[str, Any]:
                 payout = bet
 
         bankroll += payout
-        tool_context.state["bankroll"] = bankroll
-        tool_context.state["dealer_cards"] = dealer_cards
-        tool_context.state["game_status"] = "round_over"
+        if tool_context:
+            tool_context.state["bankroll"] = bankroll
+            tool_context.state["dealer_cards"] = dealer_cards
+            tool_context.state["game_status"] = "round_over"
 
         span.set_attribute("game_result", result)
         span.set_attribute("final_bankroll", bankroll)
+
+        dealer_final_total = calculate_hand_total(cards=dealer_cards).total
 
         emit_observability_log(
             "round_resolved",
             {
                 "result": result,
                 "payout": payout,
-                "player_total": p_calc["total"],
-                "dealer_total": calculate_hand_total(dealer_cards)["total"],
+                "player_total": p_calc.total,
+                "dealer_total": dealer_final_total,
                 "new_bankroll": bankroll,
             },
         )
 
-        return {
-            "result": result,
-            "dealer_cards": dealer_cards,
-            "dealer_total": calculate_hand_total(dealer_cards)["total"],
-            "payout": payout,
-            "updated_bankroll": bankroll,
-            "message": f"Round Over: {result.upper()}! Payout: ${payout:.2f}. Bankroll: ${bankroll:.2f}.",
-        }
+        return PayoutOutput(
+            result=result,
+            dealer_cards=dealer_cards,
+            dealer_total=dealer_final_total,
+            payout=payout,
+            updated_bankroll=bankroll,
+            message=f"Round Over: {result.upper()}! Payout: ${payout:.2f}. Bankroll: ${bankroll:.2f}.",
+        )
 
 
 # ─── Context & Memory: Vector Store & History Compaction Tools ──
 
 
-async def search_strategy_knowledge_base(query: str) -> dict[str, Any]:
+async def search_strategy_knowledge_base(
+    params: KnowledgeSearchInput | None = None,
+    *,
+    query: str | None = None,
+) -> KnowledgeSearchOutput:
     """Asynchronously searches the persistent vector store and strategy database for relevant rules and probabilities.
 
     Args:
+        params: Strict KnowledgeSearchInput Pydantic model.
         query: Strategic question or situation (e.g. 'hard 17 vs 10' or 'soft 18 against dealer ace').
 
     Returns:
-        dict containing the top retrieved strategy documents and mathematical reasoning.
+        KnowledgeSearchOutput containing the top retrieved strategy documents and mathematical reasoning.
     """
-    with trace_span("blackjack.vector_store_search", {"query": query}) as span:
+    if params is not None:
+        input_data = params
+    elif query is not None:
+        input_data = KnowledgeSearchInput(query=query)
+    else:
+        raise ValueError("Missing query for search_strategy_knowledge_base.")
+
+    search_query = input_data.query
+
+    with trace_span("blackjack.vector_store_search", {"query": search_query}) as span:
         vector_store = get_vector_store()
-        results = await vector_store.search(query=query, top_k=2)
+        results = await vector_store.search(query=search_query, top_k=2)
         span.set_attribute("results_count", len(results))
-        return {
-            "query": query,
-            "matches": results,
-            "source": "persistent_vector_store",
-        }
+        return KnowledgeSearchOutput(
+            query=search_query,
+            matches=results,
+            source="persistent_vector_store",
+        )
 
 
-async def compact_session_history(tool_context: ToolContext) -> dict[str, Any]:
+async def compact_session_history(
+    params: CompactionInput | None = None,
+    *,
+    max_turns: int = 6,
+    tool_context: ToolContext | None = None,
+) -> CompactionOutput:
     """Asynchronously applies history compaction to condense past rounds into a structured context summary.
 
     This prevents context bloat across long Blackjack sessions while preserving game continuity.
 
+    Args:
+        params: Strict CompactionInput Pydantic model.
+        max_turns: Historical turn threshold before triggering compaction.
+        tool_context: ADK ToolContext injected by runtime.
+
     Returns:
-        dict confirming history compaction status and preserved state.
+        CompactionOutput confirming history compaction status and preserved state.
     """
+    input_data = params or CompactionInput(max_turns=max_turns)
+
     with trace_span("blackjack.history_compaction") as span:
-        bankroll = tool_context.state.get("bankroll", 1000.0)
-        player_cards = tool_context.state.get("player_cards", [])
-        dealer_upcard = tool_context.state.get("dealer_upcard", "None")
+        bankroll = (
+            tool_context.state.get("bankroll", 1000.0) if tool_context else 1000.0
+        )
+        player_cards = (
+            tool_context.state.get("player_cards", []) if tool_context else []
+        )
+        dealer_upcard = (
+            tool_context.state.get("dealer_upcard", "None") if tool_context else "None"
+        )
 
         # Mock event list representing session events
         mock_events = [
@@ -653,55 +1003,86 @@ async def compact_session_history(tool_context: ToolContext) -> dict[str, Any]:
 
         compacted = await HistoryCompactor.compact_history_async(
             mock_events,
-            max_turns=2,
+            max_turns=input_data.max_turns,
         )
-        tool_context.state["history_compacted"] = True
+        if tool_context:
+            tool_context.state["history_compacted"] = True
         span.set_attribute("compacted_events", len(compacted))
 
-        return {
-            "status": "compacted",
-            "summary": compacted[0]["content"],
-            "preserved_bankroll": bankroll,
-        }
+        return CompactionOutput(
+            status="compacted",
+            summary=compacted[0]["content"],
+            preserved_bankroll=bankroll,
+        )
 
 
 async def record_hand_to_memory(
-    result: str,
-    player_total: int,
-    dealer_upcard: str,
-    action: str,
-    tool_context: ToolContext,
-) -> dict[str, Any]:
+    params: RecordHandInput | None = None,
+    *,
+    result: str | None = None,
+    player_total: int | None = None,
+    dealer_upcard: str | None = None,
+    action: str | None = None,
+    tool_context: ToolContext | None = None,
+) -> RecordHandOutput:
     """Asynchronously persists hand result into the long-term player memory service and vector database.
 
     Args:
+        params: Strict RecordHandInput Pydantic model.
         result: Outcome of round (e.g. 'player_win', 'dealer_win', 'push').
         player_total: Player's final total.
         dealer_upcard: Dealer's visible card.
         action: Key player action taken ('hit', 'stand', 'double').
+        tool_context: ADK ToolContext injected by runtime.
 
     Returns:
-        dict with memory confirmation.
+        RecordHandOutput with memory confirmation and updated statistics.
     """
-    with trace_span("blackjack.async_memory_record", {"result": result}) as span:
+    if params is not None:
+        input_data = params
+    elif (
+        result is not None
+        and player_total is not None
+        and dealer_upcard is not None
+        and action is not None
+    ):
+        input_data = RecordHandInput(
+            result=result,
+            player_total=player_total,
+            dealer_upcard=dealer_upcard,
+            action=action,
+        )
+    else:
+        raise ValueError("Missing parameters for record_hand_to_memory.")
+
+    with trace_span(
+        "blackjack.async_memory_record", {"result": input_data.result}
+    ) as span:
         memory_svc = get_memory_service()
-        session_id = str(tool_context.state.get("session_id", "default_session"))
+        session_id = (
+            str(tool_context.state.get("session_id", "default_session"))
+            if tool_context
+            else "default_session"
+        )
+        bankroll = (
+            tool_context.state.get("bankroll", 1000.0) if tool_context else 1000.0
+        )
         hand_data = {
-            "result": result,
-            "player_total": player_total,
-            "dealer_upcard": dealer_upcard,
-            "action": action,
-            "bankroll": tool_context.state.get("bankroll", 1000.0),
+            "result": input_data.result,
+            "player_total": input_data.player_total,
+            "dealer_upcard": input_data.dealer_upcard,
+            "action": input_data.action,
+            "bankroll": bankroll,
         }
         await memory_svc.record_hand_async(session_id, hand_data)
         stats = await memory_svc.get_player_stats_async()
         span.set_attribute("hands_played", stats.get("hands_played", 0))
 
-        return {
-            "status": "memory_saved_async",
-            "hands_played": stats.get("hands_played", 0),
-            "player_stats": stats,
-        }
+        return RecordHandOutput(
+            status="memory_saved_async",
+            hands_played=stats.get("hands_played", 0),
+            player_stats=stats,
+        )
 
 
 # ─── Multi-Agent Orchestration: Tutor Agent & Dealer Agent ────────

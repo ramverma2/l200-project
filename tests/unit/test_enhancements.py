@@ -12,12 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for PII redaction, OpenTelemetry tracing, Vector Store, and History Compaction."""
+"""Unit tests for PII redaction, OpenTelemetry tracing, Vector Store, History Compaction, and Pydantic schemas."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
+from app.agent import (
+    BetInput,
+    BetOutput,
+    DealCardOutput,
+    HandTotalInput,
+    HandTotalOutput,
+    KnowledgeSearchInput,
+    KnowledgeSearchOutput,
+    PlayerActionInput,
+    PlayerActionOutput,
+    StrategyCheckInput,
+    StrategyCheckOutput,
+    calculate_hand_total,
+    check_basic_strategy,
+    deal_random_card,
+    execute_player_action,
+    place_bet,
+    search_strategy_knowledge_base,
+)
 from app.memory_service import AsyncBlackjackMemory, HistoryCompactor
 from app.pii_redactor import PIIRedactor, redact_pii
 from app.telemetry import trace_span
@@ -144,3 +165,61 @@ def test_opentelemetry_tracing_span() -> None:
         assert span is not None
         # Verify span is usable as context manager and doesn't raise
         span.set_attribute("custom_attr", "verified")
+
+
+def test_pydantic_tool_schemas_and_signatures() -> None:
+    """Tests that tool signatures strictly accept and return Pydantic models with validation."""
+    # 1. deal_random_card returns DealCardOutput
+    deal_res = deal_random_card()
+    assert isinstance(deal_res, DealCardOutput)
+    assert deal_res.rank != ""
+    assert deal_res.suit != ""
+
+    # 2. calculate_hand_total accepts HandTotalInput and returns HandTotalOutput
+    hand_inp = HandTotalInput(cards=["Ace of Spades", "8 of Diamonds"])
+    calc_res = calculate_hand_total(params=hand_inp)
+    assert isinstance(calc_res, HandTotalOutput)
+    assert calc_res.total == 19
+    assert calc_res.is_soft is True
+
+    # 3. check_basic_strategy accepts StrategyCheckInput and returns StrategyCheckOutput
+    strat_inp = StrategyCheckInput(
+        player_cards=["10 of Clubs", "7 of Hearts"],
+        dealer_upcard="10 of Spades",
+        proposed_action="hit",
+    )
+    strat_res = check_basic_strategy(params=strat_inp)
+    assert isinstance(strat_res, StrategyCheckOutput)
+    assert strat_res.is_optimal is False
+    assert strat_res.optimal_action == "stand"
+
+    # 4. place_bet accepts BetInput and returns BetOutput
+    mock_ctx = MagicMock()
+    mock_ctx.state = {"bankroll": 1000.0}
+    mock_ctx.tool_confirmation = None
+    bet_inp = BetInput(amount=50.0)
+    bet_res = place_bet(params=bet_inp, tool_context=mock_ctx)
+    assert isinstance(bet_res, BetOutput)
+    assert bet_res.amount == 50.0
+    assert bet_res.status == "success"
+
+    # 5. execute_player_action accepts PlayerActionInput and returns PlayerActionOutput
+    action_inp = PlayerActionInput(action="stand")
+    action_res = execute_player_action(params=action_inp, tool_context=mock_ctx)
+    assert isinstance(action_res, PlayerActionOutput)
+    assert action_res.action == "stand"
+    assert action_res.status == "stood"
+
+    # 6. Verify Pydantic validation enforcement (negative bet should raise ValidationError)
+    with pytest.raises(ValidationError):
+        BetInput(amount=-10.0)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_pydantic() -> None:
+    """Tests that search_strategy_knowledge_base accepts KnowledgeSearchInput and returns KnowledgeSearchOutput."""
+    search_inp = KnowledgeSearchInput(query="hard 17 vs 10")
+    res = await search_strategy_knowledge_base(params=search_inp)
+    assert isinstance(res, KnowledgeSearchOutput)
+    assert res.query == "hard 17 vs 10"
+    assert len(res.matches) > 0
