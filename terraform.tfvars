@@ -1,0 +1,6 @@
+# Concrete Terraform configuration variables
+project_id          = "l200-final-project-tmp-argolis"
+region              = "us-east1"
+engine_display_name = "l200-project"
+min_instances       = 1
+max_instances       = 2

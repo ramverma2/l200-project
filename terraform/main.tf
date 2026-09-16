@@ -118,14 +118,59 @@ resource "google_vertex_ai_reasoning_engine" "blackjack_engine" {
   description  = "Production Multi-Agent Blackjack Strategy Tutor on Agent Runtime"
 
   spec {
-    source_code_gcs_uri = "gs://${google_storage_bucket.agent_telemetry.name}/src/agent.tar.gz"
-    
-    agent_engine_spec {
-      model_deployment_spec {
-        min_instances = var.min_instances
-        max_instances = var.max_instances
+    agent_framework = "google-adk"
+    service_account = google_service_account.agent_sa.email
+
+    deployment_spec {
+      min_instances         = var.min_instances
+      max_instances         = var.max_instances
+      container_concurrency = 9
+
+      resource_limits = {
+        cpu    = "4"
+        memory = "8Gi"
+      }
+
+      env {
+        name  = "LOGS_BUCKET_NAME"
+        value = google_storage_bucket.agent_telemetry.name
+      }
+
+      env {
+        name  = "GOOGLE_CLOUD_LOCATION"
+        value = "global"
+      }
+
+      env {
+        name  = "GOOGLE_GENAI_USE_VERTEXAI"
+        value = "True"
+      }
+
+      env {
+        name  = "OTEL_SERVICE_NAME"
+        value = "l200-project"
+      }
+
+      env {
+        name  = "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY"
+        value = "true"
       }
     }
+
+    source_code_spec {
+      inline_source {
+        source_archive = "e30="
+      }
+      image_spec {}
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      spec[0].container_spec,
+      spec[0].source_code_spec,
+      spec[0].deployment_spec,
+    ]
   }
 
   depends_on = [

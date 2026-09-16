@@ -1,29 +1,107 @@
 {
   "eval_cases": [
     {
-      "eval_case_id": "greeting",
+      "eval_case_id": "hard_17_vs_dealer_10",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Hello, what can you help me with?"}]
-      }
-    },
-    {
-      "eval_case_id": "weather_query",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What's the weather like in San Francisco?"}]
-      }
-    },
-    {
-      "eval_case_id": "capital_lookup",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What is the capital of France?"}]
+        "parts": [
+          {
+            "text": "The dealer upcard is a 10 and my hand is a hard 17. What move should I make?"
+          }
+        ]
       },
       "reference": {
         "response": {
           "role": "model",
-          "parts": [{"text": "The capital of France is Paris."}]
+          "parts": [
+            {
+              "text": "Stand. According to Blackjack basic strategy, you should always stand on hard 17 against a dealer 10. Hitting has a bust rate exceeding 69%, while standing preserves your total and maximizes your expected value against the dealer's strong upcard."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "soft_18_vs_dealer_ace",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "The dealer upcard is an Ace and my hand is a soft 18 (Ace and 7). Should I hit or stand?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Hit. Against a dealer Ace, 18 is an underdog hand because the dealer is likely to finish with 19, 20, or 21. Hitting a soft 18 carries zero bust risk because the Ace can count as 1, giving you free upside to improve to 19, 20, or 21."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "hitl_large_bet_guardrail",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "I have a $1000 bankroll and I want to bet $600 on this hand."
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "A bet of $600 represents 60% of your $1000 bankroll, exceeding the 50% safety threshold. This triggers the Human-In-The-Loop (HITL) confirmation guardrail: 'Are you sure you want to bet big? Y/N'."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "hard_11_optimal_strategy",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "I have a hard 11 (5 and 6) and the dealer's upcard is a 6. What is the basic strategy recommendation?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Double down (or hit if doubling is not permitted). You cannot bust on an 11, and the dealer's 6 is a weak bust card with a high bust probability (~42%). Doubling down maximizes your expected profit."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "stiff_hand_12_vs_bust_card_4",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "I have a hard 12 and the dealer is showing a 4. Should I hit or stand?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Stand. While a total of 12 is weak, the dealer's 4 puts them in a high bust position. Hitting risks busting your own hand with any 10-value card, whereas standing allows the dealer the opportunity to bust."
+            }
+          ]
         }
       }
     }

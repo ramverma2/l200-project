@@ -1,0 +1,179 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "multi_turn_tutor_interception_hard_17",
+      "agent_data": {
+        "agents": {
+          "dealer_agent": {
+            "agent_id": "dealer_agent",
+            "agent_type": "DealerAgent",
+            "instruction": "Deal cards, manage game flow, check strategy, and enforce bankroll."
+          },
+          "tutor_agent": {
+            "agent_id": "tutor_agent",
+            "agent_type": "TutorAgent",
+            "instruction": "Intercept suboptimal player decisions and provide mathematical explanations."
+          }
+        },
+        "turns": [
+          {
+            "turn_index": 0,
+            "events": [
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [{"text": "I'd like to bet $50."}]
+                }
+              },
+              {
+                "author": "dealer_agent",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "function_call": {
+                        "name": "place_bet",
+                        "args": {"params": {"amount": 50.0}}
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "tool",
+                "content": {
+                  "role": "tool",
+                  "parts": [
+                    {
+                      "function_response": {
+                        "name": "place_bet",
+                        "response": {
+                          "status": "success",
+                          "bankroll": 1000.0,
+                          "amount": 50.0,
+                          "remaining_bankroll": 950.0,
+                          "message": "Bet of $50.00 accepted."
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "dealer_agent",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "function_call": {
+                        "name": "start_new_hand",
+                        "args": {}
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "tool",
+                "content": {
+                  "role": "tool",
+                  "parts": [
+                    {
+                      "function_response": {
+                        "name": "start_new_hand",
+                        "response": {
+                          "player_cards": ["10 of Spades", "7 of Hearts"],
+                          "player_total": 17,
+                          "is_soft": false,
+                          "dealer_upcard": "10 of Diamonds",
+                          "message": "Cards dealt!"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "dealer_agent",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "text": "Cards are dealt! You have a Hard 17 (10 of Spades, 7 of Hearts). The dealer shows a 10 of Diamonds. What is your move (hit or stand)?"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "turn_index": 1,
+            "events": [
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [{"text": "I want to hit."}]
+                }
+              },
+              {
+                "author": "dealer_agent",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "function_call": {
+                        "name": "check_basic_strategy",
+                        "args": {
+                          "params": {
+                            "player_cards": ["10 of Spades", "7 of Hearts"],
+                            "dealer_upcard": "10 of Diamonds",
+                            "proposed_action": "hit"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "tool",
+                "content": {
+                  "role": "tool",
+                  "parts": [
+                    {
+                      "function_response": {
+                        "name": "check_basic_strategy",
+                        "response": {
+                          "is_optimal": false,
+                          "optimal_action": "stand",
+                          "proposed_action": "hit",
+                          "player_total": 17,
+                          "is_soft": false,
+                          "dealer_upcard": "10 of Diamonds",
+                          "reason": "Player has Hard 17 against dealer 10 of Diamonds. Hitting on hard 17+ has a high bust rate (>69%). Basic strategy requires standing."
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "dealer_agent",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "text": "Hold on! As your Blackjack Strategy Tutor, I must advise you that hitting on Hard 17 is mathematically suboptimal. The bust rate is over 69%. Standing gives you the best chance to win or push against the dealer's 10. Do you still want to hit, or will you stand?"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
